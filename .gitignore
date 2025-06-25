@@ -1,0 +1,36 @@
+# Build products
+.build/
+DerivedData/
+*.xcworkspace/
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/
+
+# SwiftPM dependencies and binary outputs
+.swiftpm/
+Packages/
+*.resolved
+
+# Logs and temporary files
+*.log
+*.swp
+*.tmp
+.DS_Store
+
+# Playground and doc cache (if used)
+timeline.xctimeline
+playground.xcworkspace
+
+# User-specific Xcode files
+*.xcuserstate
+*.xcscmblueprint
+*.xcuserdatad
+
+# SwiftLint cache (optional)
+.swiftlint.yml
+.swiftlint.tmp
+
+# If using Xcode preview canvas snapshots
+*.preview-thumbnails
+
+# If you use tests that generate snapshot images
+__Snapshots__/
