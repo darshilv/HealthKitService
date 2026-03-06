@@ -34,3 +34,7 @@ playground.xcworkspace
 
 # If you use tests that generate snapshot images
 __Snapshots__/
+
+# Claude Code cache and local configuration
+.cache/
+.claude/
