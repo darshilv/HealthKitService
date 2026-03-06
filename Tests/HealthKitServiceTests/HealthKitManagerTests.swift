@@ -1,13 +1,63 @@
 import XCTest
+import HealthKit
 @testable import HealthKitService
 
+// MARK: - Mock Implementations
+
+class MockHealthStore: HealthStoreAuthorizing {
+    var authorizationCallCount = 0
+    func requestAuthorization(toShare: Set<HKSampleType>, read: Set<HKObjectType>) async throws {
+        authorizationCallCount += 1
+    }
+}
+
+class MockWorkoutBuilder: WorkoutBuilding {
+    var didBeginCollection = false
+    var didEndCollection = false
+    var didFinishWorkout = false
+    var addedSamples: [HKSample] = []
+    var addedEvents: [HKWorkoutEvent] = []
+
+    func beginCollection(at startDate: Date) async throws {
+        didBeginCollection = true
+    }
+
+    func endCollection(at endDate: Date) async throws {
+        didEndCollection = true
+    }
+
+    func addSamples(_ samples: [HKSample]) async throws {
+        addedSamples += samples
+    }
+
+    func addWorkoutEvents(_ events: [HKWorkoutEvent]) async throws {
+        addedEvents += events
+    }
+
+    func finishWorkout() async throws {
+        didFinishWorkout = true
+    }
+}
+
 final class HealthKitManagerTests: XCTestCase {
+    private func makeManager(
+        healthStore: HealthStoreAuthorizing = MockHealthStore(),
+        builderFactory: ((HKWorkoutConfiguration) -> any WorkoutBuilding)? = nil
+    ) -> HealthKitManager {
+        HealthKitManager(
+            healthStore: healthStore,
+            builderFactory: builderFactory ?? { _ in MockWorkoutBuilder() }
+        )
+    }
+    // MARK: - Green: Test mode initialization
+
     func testBeginAndEndWorkout_doesNotThrow() async {
-        let manager = HealthKitManager()
+        let manager = makeManager()
         let now = Date()
         let later = now.addingTimeInterval(60)
 
         do {
+            try await manager.requestAuthorization()
             try await manager.beginWorkout(startDate: now)
             try await manager.endWorkout(endDate: later, energyBurned: 20.0)
         } catch {
@@ -16,7 +66,7 @@ final class HealthKitManagerTests: XCTestCase {
     }
 
     func testBeginWorkoutWithYogaDefaults_doesNotThrow() async {
-        let manager = HealthKitManager()
+        let manager = makeManager()
         let now = Date()
         let later = now.addingTimeInterval(60)
 
@@ -29,7 +79,7 @@ final class HealthKitManagerTests: XCTestCase {
     }
 
     func testBeginWorkoutWithRunning_doesNotThrow() async {
-        let manager = HealthKitManager()
+        let manager = makeManager()
         let now = Date()
         let later = now.addingTimeInterval(60)
 
@@ -42,7 +92,7 @@ final class HealthKitManagerTests: XCTestCase {
     }
 
     func testBeginWorkoutWithSwimming_doesNotThrow() async {
-        let manager = HealthKitManager()
+        let manager = makeManager()
         let now = Date()
         let later = now.addingTimeInterval(60)
 
@@ -55,7 +105,7 @@ final class HealthKitManagerTests: XCTestCase {
     }
 
     func testBeginWorkoutWithCycling_doesNotThrow() async {
-        let manager = HealthKitManager()
+        let manager = makeManager()
         let now = Date()
         let later = now.addingTimeInterval(60)
 
@@ -68,7 +118,7 @@ final class HealthKitManagerTests: XCTestCase {
     }
 
     func testMultipleActivityTypes_sequentialWorkouts() async {
-        let manager = HealthKitManager()
+        let manager = makeManager()
         let now = Date()
 
         do {
@@ -96,7 +146,7 @@ final class HealthKitManagerTests: XCTestCase {
     // MARK: - Pause/Resume Tests
 
     func testPauseAndResumeWorkout_doesNotThrow() async {
-        let manager = HealthKitManager()
+        let manager = makeManager()
         let now = Date()
 
         do {
@@ -111,7 +161,7 @@ final class HealthKitManagerTests: XCTestCase {
     }
 
     func testPauseWithoutWorkout_throws() async {
-        let manager = HealthKitManager()
+        let manager = makeManager()
 
         do {
             try await manager.pauseWorkout()
@@ -124,7 +174,7 @@ final class HealthKitManagerTests: XCTestCase {
     }
 
     func testDoublePause_throws() async {
-        let manager = HealthKitManager()
+        let manager = makeManager()
         let now = Date()
 
         do {
@@ -140,7 +190,7 @@ final class HealthKitManagerTests: XCTestCase {
     }
 
     func testResumeWithoutPause_throws() async {
-        let manager = HealthKitManager()
+        let manager = makeManager()
         let now = Date()
 
         do {
@@ -155,7 +205,7 @@ final class HealthKitManagerTests: XCTestCase {
     }
 
     func testMultiplePauseResumeCycles_doesNotThrow() async {
-        let manager = HealthKitManager()
+        let manager = makeManager()
         let now = Date()
 
         do {
@@ -181,7 +231,7 @@ final class HealthKitManagerTests: XCTestCase {
     }
 
     func testEnergyAdjustment_accountsForPausedTime() async {
-        let manager = HealthKitManager()
+        let manager = makeManager()
         let now = Date()
         let pauseTime: TimeInterval = 30 // 30 seconds paused
         let totalTime: TimeInterval = 120 // 2 minutes total

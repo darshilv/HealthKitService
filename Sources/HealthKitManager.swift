@@ -2,6 +2,71 @@ import Foundation
 import HealthKit
 import os
 
+// MARK: - Dependency Injection Protocols
+
+/// Abstracts HealthKit authorization requests
+protocol HealthStoreAuthorizing: AnyObject {
+    func requestAuthorization(toShare: Set<HKSampleType>, read: Set<HKObjectType>) async throws
+}
+
+/// Abstracts workout building and data collection
+protocol WorkoutBuilding: AnyObject {
+    func beginCollection(at startDate: Date) async throws
+    func endCollection(at endDate: Date) async throws
+    func addSamples(_ samples: [HKSample]) async throws
+    func addWorkoutEvents(_ events: [HKWorkoutEvent]) async throws
+    func finishWorkout() async throws
+}
+
+// MARK: - HealthKit Conformances
+
+extension HKHealthStore: HealthStoreAuthorizing {}
+
+/// Wraps HKWorkoutBuilder to provide an async/await interface conforming to WorkoutBuilding
+final class LiveWorkoutBuilder: WorkoutBuilding {
+    private let builder: HKWorkoutBuilder
+
+    init(healthStore: HKHealthStore, configuration: HKWorkoutConfiguration) {
+        self.builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: nil)
+    }
+
+    func beginCollection(at startDate: Date) async throws {
+        try await builder.beginCollection(at: startDate)
+    }
+
+    func endCollection(at endDate: Date) async throws {
+        try await builder.endCollection(at: endDate)
+    }
+
+    func addSamples(_ samples: [HKSample]) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            builder.add(samples) { success, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
+    func addWorkoutEvents(_ events: [HKWorkoutEvent]) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            builder.addWorkoutEvents(events) { success, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
+    func finishWorkout() async throws {
+        _ = try await builder.finishWorkout()
+    }
+}
+
 // MARK: - WorkoutState Enumeration
 enum WorkoutState {
     case notStarted
@@ -32,9 +97,10 @@ enum WorkoutPauseError: LocalizedError, Equatable {
 }
 
 public final class HealthKitManager: HealthKitWorkoutTracking {
-    private let healthStore = HKHealthStore()
+    private let healthStore: any HealthStoreAuthorizing
+    private let builderFactory: (HKWorkoutConfiguration) -> any WorkoutBuilding
     private let logger = Logger(subsystem: "com.healthkit.manager", category: "HealthKitManager")
-    private var builder: HKWorkoutBuilder?
+    private var builder: (any WorkoutBuilding)?
     private var workoutStartDate: Date?
 
     // State tracking for pause/resume functionality
@@ -44,7 +110,15 @@ public final class HealthKitManager: HealthKitWorkoutTracking {
     private var totalPausedDuration: TimeInterval = 0
     private var pauseResumeHistory: [(pauseTime: Date, resumeTime: Date?)] = []
 
-    public init() {}
+    public init(
+        healthStore: any HealthStoreAuthorizing = HKHealthStore(),
+        builderFactory: ((HKWorkoutConfiguration) -> any WorkoutBuilding)? = nil
+    ) {
+        self.healthStore = healthStore
+        self.builderFactory = builderFactory ?? { config in
+            LiveWorkoutBuilder(healthStore: HKHealthStore(), configuration: config)
+        }
+    }
 
     public func requestAuthorization() async throws {
         let typesToShare: Set = [
@@ -66,7 +140,7 @@ public final class HealthKitManager: HealthKitWorkoutTracking {
         configuration.activityType = activityType.hkActivityType
         configuration.locationType = locationType.hkLocationType
 
-        let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: nil)
+        let builder = builderFactory(configuration)
         try await builder.beginCollection(at: startDate)
 
         self.builder = builder
@@ -122,6 +196,7 @@ public final class HealthKitManager: HealthKitWorkoutTracking {
 
     public func endWorkout(endDate: Date, energyBurned: Double?) async throws {
         logger.info("🏁 HealthKitManager.endWorkout at \(endDate), energy: \(energyBurned ?? -1)")
+
         guard let builder = builder else { return }
 
         try await builder.endCollection(at: endDate)
@@ -135,7 +210,7 @@ public final class HealthKitManager: HealthKitWorkoutTracking {
                     workoutEvents.append(HKWorkoutEvent(type: .resume, date: resumeTime))
                 }
             }
-            try await addWorkoutEventsAsync(workoutEvents, to: builder)
+            try await builder.addWorkoutEvents(workoutEvents)
         }
 
         if let kcal = energyBurned {
@@ -158,11 +233,12 @@ public final class HealthKitManager: HealthKitWorkoutTracking {
                 start: workoutStartDate ?? endDate,
                 end: endDate
             )
-            try await addSampleAsync(energySample, to: builder)
+            try await builder.addSamples([energySample])
         }
 
-        _ = try await builder.finishWorkout()
+        try await builder.finishWorkout()
         self.builder = nil
+
         self.workoutStartDate = nil
 
         // Reset pause/resume tracking state
@@ -171,30 +247,6 @@ public final class HealthKitManager: HealthKitWorkoutTracking {
         self.pausedStartDate = nil
         self.totalPausedDuration = 0
         self.pauseResumeHistory = []
-    }
-
-    private func addSampleAsync(_ sample: HKSample, to builder: HKWorkoutBuilder) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            builder.add([sample]) { success, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
-            }
-        }
-    }
-
-    private func addWorkoutEventsAsync(_ events: [HKWorkoutEvent], to builder: HKWorkoutBuilder) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            builder.addWorkoutEvents(events) { success, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
-            }
-        }
     }
 
     // MARK: - Helper Methods
