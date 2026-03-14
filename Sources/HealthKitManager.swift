@@ -7,6 +7,7 @@ import os
 /// Abstracts HealthKit authorization requests
 protocol HealthStoreAuthorizing: AnyObject {
     func requestAuthorization(toShare: Set<HKSampleType>, read: Set<HKObjectType>) async throws
+    func authorizationStatus(for type: HKObjectType) -> HKAuthorizationStatus
 }
 
 /// Abstracts workout building and data collection
@@ -126,6 +127,18 @@ public final class HealthKitManager: HealthKitWorkoutTracking {
             HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
         ]
         try await healthStore.requestAuthorization(toShare: typesToShare, read: [])
+    }
+
+    /// Returns the current HealthKit write authorization status for each type this manager tracks.
+    /// Does NOT trigger a permission prompt. Only write types are checked — HealthKit always returns
+    /// .notDetermined for read types due to iOS privacy rules.
+    public func authorizationSummary() -> [(name: String, status: HKAuthorizationStatus)] {
+        let workoutType = HKObjectType.workoutType()
+        let energyType = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
+        return [
+            (name: "Workout (Write)", status: healthStore.authorizationStatus(for: workoutType)),
+            (name: "Active Energy (Write)", status: healthStore.authorizationStatus(for: energyType))
+        ]
     }
 
     public func beginWorkout(
