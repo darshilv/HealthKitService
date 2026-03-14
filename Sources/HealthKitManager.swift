@@ -5,13 +5,13 @@ import os
 // MARK: - Dependency Injection Protocols
 
 /// Abstracts HealthKit authorization requests
-protocol HealthStoreAuthorizing: AnyObject {
+public protocol HealthStoreAuthorizing: AnyObject {
     func requestAuthorization(toShare: Set<HKSampleType>, read: Set<HKObjectType>) async throws
     func authorizationStatus(for type: HKObjectType) -> HKAuthorizationStatus
 }
 
 /// Abstracts workout building and data collection
-protocol WorkoutBuilding: AnyObject {
+public protocol WorkoutBuilding: AnyObject {
     func beginCollection(at startDate: Date) async throws
     func endCollection(at endDate: Date) async throws
     func addSamples(_ samples: [HKSample]) async throws
